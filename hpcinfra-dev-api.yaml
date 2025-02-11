@@ -1,0 +1,791 @@
+openapi: 3.0.0
+info:
+  title: HPC Infra Cluster Management API
+  description: API for managing clusters across cloud providers with tool and service installation
+  version: 0.1.0
+
+servers:
+  - url: https://api._tenant_.hpcinfra.com/0.1.0/
+
+components:
+  schemas:
+    Tenant:
+      type: object
+      required: 
+        - name
+        - id
+      properties:
+        id:
+         type: string
+         format: uuid
+        name:
+         type: string
+        resources:
+         type: array
+         items: 
+          $ref: '#/components/schemas/Resource'
+        users:
+         type: array
+         items:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [it_manager, cad_manager, developer]
+
+    Service:
+      type: object
+      required:
+        - name
+        - version
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "postgresql"
+        version:
+          type: string
+        config:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum: [pending, provisioning, running, failed, stopped]
+        credentials:
+          type: object
+          additionalProperties: true
+
+    Cluster:
+      type: object
+      required:
+        - name
+        - cloudProviderId
+        - size
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        cloudProviderId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [slurm]
+        size:
+          type: object
+          properties:
+            numberOfNodes:
+              type: integer
+              minimum: 1
+            nodeType:
+              type: string
+              enum: [small, medium, large]
+            storage:
+              type: integer
+              minimum: 10
+        status:
+          type: string
+          enum: [pending, provisioning, available, error]
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tool'
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/Service'
+        createdAt:
+          type: string
+          format: date-time
+
+
+    Resource:
+       type: object
+       required:
+         - type
+         - id
+       properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [tool, service, cluster]
+        details:
+          oneOf:
+           - $ref: '#/components/schemas/Tool'
+           - $ref: '#/components/schemas/Cluster'
+           - $ref: '#/components/schemas/Service'
+          discriminator:
+            propertyName: type
+            mapping: 
+              tool: '#/components/schemas/Tool'
+              service: '#/components/schemas/Service'
+              cluster: '#/components/schemas/Cluster'
+        licenses:
+          type: integer
+          minimum: 0
+        provisionedBy:
+          $ref: '#/components/schemas/User'
+        provisionedAt:
+          type: string
+          format: date-time
+
+
+    Request:
+      type: object
+      required:
+        - name
+        - cloudProviderId
+        - size
+        - requestedBy
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        cloudProviderId:
+          type: string
+          format: uuid
+        size:
+          type: object
+          properties:
+            numberOfNodes:
+              type: integer
+              minimum: 1
+            nodeType:
+              type: string
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tool'
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/Service'
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+          default: pending
+        requestedBy:
+          $ref: '#/components/schemas/User'
+        approvedBy:
+          $ref: '#/components/schemas/User'
+        requestedAt:
+          type: string
+          format: date-time
+        approvedAt:
+          type: string
+          format: date-time
+        notes:
+          type: array
+          items :
+           type: object
+           properties:
+             time:
+               type: string
+               format: date-time
+             by:
+               $ref: '#/components/schemas/User'
+             note:
+               type: string
+
+        
+    CloudProvider:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          enum: [AWS, GCP, Azure]
+        # credentials:
+        #   type: object
+        #   additionalProperties: true
+        region:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+
+
+    Tool:
+      type: object
+      required:
+        - name
+        - version
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "iverilog"
+        version:
+          type: string
+
+
+  securitySchemes:
+    AccessKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: "Access key ID"
+    
+    SecretKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Secret
+      description: "Secret access key"
+
+security:
+  - AccessKeyAuth: []
+    SecretKeyAuth: []
+
+
+paths:
+  /requests:
+    get:
+      summary: Requests - List all 
+      description: Get all requests with status. Limited based on role of requesting user
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+        - name: requestedBy
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of cluster requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Request'
+
+    post:
+      summary: Requests - Create new
+      description: CAD managers can request new clusters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Request'
+      responses:
+        '201':
+          description: Cluster request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Request'
+
+  /requests/{requestId}:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      summary: Requests - Get details of individual request
+      responses:
+        '200':
+          description: Request details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Request'
+
+    put:
+      summary: Requests - Approve or reject
+      description: IT managers can approve or reject requests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [approved, rejected]
+                rejectionReason:
+                  type: string
+      responses:
+        '200':
+          description: Request updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Request'
+
+  /requests/{requestId}/notes:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      summary: Requests - Get all notes
+      responses:
+        '200':
+          description: List of notes for the request
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    time:
+                      type: string
+                      format: date-time
+                    by:
+                      $ref: '#/components/schemas/User'
+                    note:
+                      type: string
+
+    post:
+      summary: Requests - Add a note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - note
+              properties:
+                note:
+                  type: string
+      responses:
+        '201':
+          description: Note added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  time:
+                    type: string
+                    format: date-time
+                  by:
+                    $ref: '#/components/schemas/User'
+                  note:
+                    type: string
+          
+  /clusters:
+    get:
+      summary: Cluster - List all clusters 
+      description: List all clusters created by the current user
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: cloudProviderId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of clusters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cluster'
+
+    post:
+      summary: Cluster - Create a new cluster
+      description: CAD managers can create new clusters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Cluster'
+      responses:
+        '201':
+          description: Cluster successfully created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cluster'
+
+  /clusters/{clusterId}:
+    parameters:
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      summary: Cluster - Get cluster details
+      responses:
+        '200':
+          description: Cluster details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cluster'
+
+    delete:
+      summary: Cluster - Terminate cluster
+      responses:
+        '204':
+          description: Cluster termination initiated
+
+  /clusters/{clusterId}/tools:
+    parameters:
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      summary: Cluster - Install a tool on the cluster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tool'
+      responses:
+        '201':
+          description: Tool installation initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tool'
+
+  /clusters/{clusterId}/services:
+    parameters:
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      summary: Cluster - Deploy a service on the cluster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Service'
+      responses:
+        '201':
+          description: Service deployment initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+
+  /clusters/{clusterId}/analytics/metrics:
+    parameters:
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: start
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: end
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: interval
+        in: query
+        schema:
+          type: string
+          enum: [minute, hour, day]
+          default: hour
+
+    get:
+      summary: Analytics - Get cluster metrics over time
+      description: Retrieve metrics like CPU, memory, storage utilization and credit consumption
+      responses:
+        '200':
+          description: Cluster metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  timeRange:
+                    type: object
+                    properties:
+                      start:
+                        type: string
+                        format: date-time
+                      end:
+                        type: string
+                        format: date-time
+                      interval:
+                        type: string
+                  metrics:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                        cpu:
+                          type: object
+                          properties:
+                            utilizationPercent:
+                              type: number
+                              format: float
+                            allocatedCores:
+                              type: integer
+                        memory:
+                          type: object
+                          properties:
+                            utilizationPercent:
+                              type: number
+                              format: float
+                            allocatedGB:
+                              type: integer
+                        storage:
+                          type: object
+                          properties:
+                            utilizationPercent:
+                              type: number
+                            allocatedGB:
+                              type: integer
+                        credits:
+                          type: object
+                          properties:
+                            consumed:
+                              type: number
+                              format: float
+                            rate:
+                              type: number
+                              description: Credits consumed per hour
+
+  /clusters/{clusterId}/analytics/summary:
+    parameters:
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      summary: Analytics - Get current cluster analytics summary
+      description: Get real-time summary of cluster utilization and costs
+      responses:
+        '200':
+          description: Current cluster analytics summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  current:
+                    type: object
+                    properties:
+                      cpu:
+                        type: object
+                        properties:
+                          utilizationPercent:
+                            type: number
+                          allocatedCores:
+                            type: integer
+                      memory:
+                        type: object
+                        properties:
+                          utilizationPercent:
+                            type: number
+                          allocatedGB:
+                            type: integer
+                      storage:
+                        type: object
+                        properties:
+                          utilizationPercent:
+                            type: number
+                          allocatedGB:
+                            type: integer
+                  credits:
+                    type: object
+                    properties:
+                      totalConsumed:
+                        type: number
+                      currentRate:
+                        type: number
+                        description: Credits per hour
+                      estimatedDaily:
+                        type: number
+                      estimatedMonthly:
+                        type: number
+
+  /providers:
+    get:
+      summary: Providers - List available cloud providers
+      responses:
+        '200':
+          description: List of cloud providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CloudProvider'
+
+
+
+
+  /tenant/analytics:
+    parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: start
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: end
+        in: query
+        schema:
+          type: string
+          format: date-time
+
+    get:
+      summary: Analytics - Get tenant-wide analytics
+      description: Get aggregated analytics across all tenant resources including clusters, costs and utilization
+      responses:
+        '200':
+          description: Tenant analytics summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  overview:
+                    type: object
+                    properties:
+                      totalClusters:
+                        type: integer
+                      activeClusters:
+                        type: integer
+                      totalUsers:
+                        type: integer
+                      activeUsers:
+                        type: integer
+                  resources:
+                    type: object
+                    properties:
+                      totalCores:
+                        type: integer
+                      totalMemoryGB:
+                        type: integer
+                      totalStorageGB:
+                        type: integer
+                      averageUtilization:
+                        type: object
+                        properties:
+                          cpu:
+                            type: number
+                          memory:
+                            type: number
+                          storage:
+                            type: number
+                  credits:
+                    type: object
+                    properties:
+                      balance:
+                        type: number
+                      consumed:
+                        type: object
+                        properties:
+                          daily:
+                            type: number
+                          weekly:
+                            type: number
+                          monthly:
+                            type: number
+                      forecast:
+                        type: object
+                        properties:
+                          nextWeek:
+                            type: number
+                          nextMonth:
+                            type: number
+                  breakdown:
+                    type: object
+                    properties:
+                      byCluster:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            clusterId:
+                              type: string
+                              format: uuid
+                            name:
+                              type: string
+                            creditsConsumed:
+                              type: number
+                            utilizationPercent:
+                              type: number
+                      byUser:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            userId:
+                              type: string
+                              format: uuid
+                            name:
+                              type: string
+                            creditsConsumed:
+                              type: number
